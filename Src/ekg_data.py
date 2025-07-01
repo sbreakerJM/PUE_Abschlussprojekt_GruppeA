@@ -1,87 +1,94 @@
-import pandas as pd
-import matplotlib.pyplot as plt
+import numpy as np
+from Src.find_peaks import find_peaks_custom
 import plotly.graph_objects as go
-FILE_PATH = "data/person_db.json"
 
 class Ekg_tests:
-    def __init__(self, id: int, date: str, result_link: str):
+    def __init__(self, id, date, result_link, max_length=None, sampling_rate=100):
         self.id = id
         self.date = date
         self.result_link = result_link
-        self.load_df_ekg()
-        
+        self.max_length = max_length
+        self.sampling_rate = sampling_rate
+        self.signal = self.load_signal()
+        self.peaks = []
+        self.hr = []
 
-    def get_reslult_link(self):
-        return self.result_link
-    
-    def load_df_ekg(self):
-        self.df_ekg = pd.read_csv(self.result_link, sep = "\t", names=["Voltage in [mV]", "Time in [ms]"])
-        #self.df_ekg = self.df_ekg.iloc[0:5000]
 
-    def find_peaks(self, threshold = 340, min_peak_distance = 10):
-        list_of_index_of_peaks = []
-        last_peaks_index = 0
-        for index, row in self.df_ekg.iterrows():
-            if index < self.df_ekg.index.max() -1:
-            #wenn row größer als das vorhegehende und das nachfolgende Element
-            #dann füge den aktuellen Index der Liste hinzu
-                if row["Voltage in [mV]"] >= self.df_ekg.iloc[index-1]["Voltage in [mV]"] and row["Voltage in [mV]"] > self.df_ekg.iloc[index+1]["Voltage in [mV]"]:
-                    
-                    if row["Voltage in [mV]"] > threshold and index - last_peaks_index > min_peak_distance:
-                        list_of_index_of_peaks.append(index)
-                        last_peaks_index = index
-        self.list_of_index_of_peaks = list_of_index_of_peaks
-        return list_of_index_of_peaks
-    
+    def load_signal(self):
+        try:
+            with open(self.result_link, "r") as file:
+                data = []
+                for line in file:
+                    if line.strip():
+                        parts = line.strip().split()  # Trennung z. B. bei Tab
+                        try:
+                            value = float(parts[0])    # Nur erste Spalte (Signalwert)
+                            data.append(value)
+                        except ValueError:
+                            continue  # Ungültige Zeile überspringen
+
+            if self.max_length is not None and len(data) > self.max_length:
+                data = data[:self.max_length]
+                print(f"⚠️ Signal gekürzt auf {self.max_length} Werte")
+
+            print(f"📦 {self.result_link}: {len(data)} Werte geladen")
+            return data
+
+        except Exception as e:
+            print(f"❌ Fehler beim Laden von {self.result_link}: {e}")
+            return []
+
+
+    def find_peaks(self, threshold=360):
+        from Src.find_peaks import find_peaks_custom
+        self.peaks = find_peaks_custom(self.signal, threshold=threshold)
+
+
+
     def estimate_hr(self):
         hr = []
-        i = 0
-        for peak in self.list_of_index_of_peaks:
-            if i >= len(self.list_of_index_of_peaks) - 1:
-                break
-            else:
-                time_hr = self.list_of_index_of_peaks[i+1] - self.list_of_index_of_peaks[i]
-                time_hr = time_hr * 2
-                puls = 60000 / time_hr
-                hr.append(puls)
-                i += 1
+        if not hasattr(self, 'sampling_rate'):
+            self.sampling_rate = 100  # Fallback-Wert
 
-            #time_diff = self.df_ekg.iloc[peak]["Time in [ms]"] - self.df_ekg.iloc[list_of_index_of_peaks[0]]["Time in [ms]"]
-            #hr = 60000 / time_diff
+        for i in range(len(self.peaks) - 1):
+            t1 = self.peaks[i]
+            t2 = self.peaks[i + 1]
+            time_diff_sec = (t2 - t1) / self.sampling_rate
+
+            if time_diff_sec > 0:
+                bpm = 60 / time_diff_sec
+                hr.append(bpm)
+
         self.hr = hr
         return self.hr
-  
+
+
     def plot_time_series(self):
-        
-        # Y-Werte
-        y_vals = pd.Series(self.hr).rolling(window=100).mean()
+        """Plottet das vollständige Signal mit Peak-Markierung."""
+        x_axis = [i / self.sampling_rate for i in range(len(self.signal))]
 
-        x_vals = list(range(len(y_vals)))
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=x_axis,
+            y=self.signal,
+            mode="lines",
+            name="EKG-Signal"
+        ))
 
-        # Dynamische Y-Achsen-Grenzen
-        y_min = min(y_vals) - 5
-        y_max = max(y_vals) + 5
+        if self.peaks:
+            fig.add_trace(go.Scatter(
+                x=[i / self.sampling_rate for i in self.peaks],
+                y=[self.signal[i] for i in self.peaks],
+                mode="markers",
+                marker=dict(color="red", size=6),
+                name="Peaks"
+            ))
 
-        fig1 = go.Figure()
-        fig1.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines+markers'))
-
-        fig1.update_layout(
-            title="Geschätzte Herzfrequenz über Zeit",
-            xaxis_title="Messpunkt (Peak-Index)",
-            yaxis_title="Herzfrequenz (bpm)",
-            yaxis=dict(range=[y_min, y_max]),
-            template="plotly_white"
-            )
-
-        self.fig1 = fig1
-        return fig1
-
-if __name__ == "__main__":
-
-    unser_ekg = Ekg_tests(1, "10.2.2023", "data/ekg_data/01_Ruhe.txt")
-    unser_ekg.find_peaks()
-    list_of_hr = unser_ekg.estimate_hr()
-
-    #plt.plot(list_of_hr)
-    #plt.show()
-    unser_ekg.plot_time_series(list_of_hr)
+        fig.update_layout(
+            title="EKG-Zeitreihe",
+            xaxis_title="Zeit (s)",
+            yaxis_title="Amplitude",
+            height=400
+        )
+        return fig
+    

@@ -3,6 +3,7 @@ import json
 import os
 from PIL import Image
 import pandas as pd
+import numpy as np
 
 from Src.user_db import check_login, create_user, get_user, update_person
 from Src.analyze_hr_data import analyze_hr_data
@@ -90,24 +91,25 @@ if not st.session_state["logged_in"]:
     st.stop()
 
 # === App nach Login ===
-st.title("📊 EKG-Analyseplattform")
+st.title("EKG-Analyse")
 
 user = st.session_state["user"]
 person = user["person"]
 
 tabs = st.tabs([
-    "👤 Benutzerdaten ansehen",
-    "✏️ Benutzerdaten bearbeiten",
-    "📈 Herzrate über Zeit",
-    "🫀 EKG & HF-Verlauf"
+    "Deine Nutzerdaten",
+    "Nutzerdaten bearbeiten",
+    "Herzrate über Zeit",
+    "EKG & HF-Verlauf"
 ])
 
 with tabs[0]:
-    st.subheader("👤 Persönliche Daten")
+    st.subheader("Willkommen, " + person["firstname"] + "! ")
     st.image(Image.open(person["picture_path"]), width=200)
-    st.write("🆔 ID:", person["id"])
-    st.write("📅 Alter:", 2025 - person["date_of_birth"], "Jahre")
-    st.write("❤️ Max. Herzfrequenz:", round(220 - (2025 - person["date_of_birth"])), "bpm")
+    st.write("**Name:**", f"{person['lastname']}, {person['firstname']}")
+    st.write("Deine ID:", person["id"])
+    st.write("Dein Alter:", 2025 - person["date_of_birth"], "Jahre")
+    st.write("Schätzung deiner maximalen Herzfrequenz:", round(220 - (2025 - person["date_of_birth"])), "bpm")
 
 with tabs[1]:
     st.subheader("✏️ Benutzerdaten bearbeiten")
@@ -141,21 +143,131 @@ with tabs[2]:
 
 with tabs[3]:
     st.subheader("🫀 EKG & Herzfrequenzverlauf")
-    ekg_tests = person.get("ekg_tests", [])
-    if ekg_tests:
-        ekg_info = ekg_tests[0]
-        ekg = Ekg_tests(id=person["id"], date=ekg_info["date"], result_link=ekg_info["result_link"])
-        ekg.find_peaks()
-        ekg.estimate_hr()
-        fig1 = ekg.plot_time_series()
-        st.plotly_chart(fig1)
 
-        hr_df = pd.DataFrame({
-            "Peak-Nr": list(range(1, len(ekg.hr) + 1)),
+    # Samplingrate-Eingabe
+    sampling_rate = st.number_input("Samplingrate (Hz)", min_value=50, max_value=2000, value=500, step=10)
+
+    # Threshold für Peak-Erkennung
+    threshold = st.slider("Peak-Schwellenwert (Amplitude)", min_value=100, max_value=1000, value=360, step=10)
+
+    ekg_tests = person.get("ekg_tests", [])
+    if not ekg_tests:
+        st.warning("⚠️ Keine EKG-Daten vorhanden.")
+        st.stop()
+
+    # EKG-Test auswählen
+    test_labels = [f"{i+1}. {test['date']}" for i, test in enumerate(ekg_tests)]
+    selected_index = st.selectbox(
+        "Wähle einen EKG-Test",
+        options=list(range(len(ekg_tests))),
+        format_func=lambda i: test_labels[i]
+    )
+    selected_test = ekg_tests[selected_index]
+
+    # EKG laden
+    ekg = Ekg_tests(
+        id=selected_test["id"],
+        date=selected_test["date"],
+        result_link=selected_test["result_link"],
+        sampling_rate=sampling_rate
+    )
+
+    ekg.find_peaks(threshold=threshold)
+    ekg.estimate_hr()
+    signal = ekg.signal
+
+    if not signal or len(signal) < 2:
+        st.warning("⚠️ Das EKG-Signal ist leer oder zu kurz.")
+        st.stop()
+
+    duration_sec = len(signal) / sampling_rate
+    st.caption(f"📏 Gesamtdauer des EKG-Signals: {round(duration_sec/60, 2)} Minuten")
+
+    # Bereichssteuerung
+    custom_range = st.number_input(
+        "🕒 Maximale Anzeigedauer (Sekunden)",
+        min_value=1.0,
+        max_value=duration_sec,
+        value=min(10.0, duration_sec),
+        step=1.0
+    )
+    start_sec, end_sec = st.slider(
+        "Zeitraum im Signal wählen",
+        min_value=0.0,
+        max_value=round(duration_sec - custom_range, 2),
+        value=(0.0, round(min(custom_range, duration_sec), 2)),
+        step=0.1
+    )
+
+    start_idx = int(start_sec * sampling_rate)
+    end_idx = int(end_sec * sampling_rate)
+    visible_signal = signal[start_idx:end_idx]
+
+    # Plot erstellen
+    import plotly.graph_objects as go
+    fig = go.Figure()
+
+    x_vals = [i / sampling_rate for i in range(start_idx, end_idx)]
+    fig.add_trace(go.Scatter(
+        x=x_vals,
+        y=visible_signal,
+        mode="lines",
+        name="EKG"
+    ))
+
+    if ekg.peaks:
+        peak_times = [i / sampling_rate for i in ekg.peaks if start_idx <= i < end_idx]
+        peak_values = [signal[i] for i in ekg.peaks if start_idx <= i < end_idx]
+        fig.add_trace(go.Scatter(
+            x=peak_times,
+            y=peak_values,
+            mode="markers",
+            marker=dict(color="red", size=6),
+            name="Peaks"
+        ))
+
+    fig.update_layout(
+        title="EKG-Zeitreihe mit Peaks",
+        xaxis_title="Zeit (s)",
+        yaxis_title="Amplitude (mV)",
+        height=400
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # HF-Werte als Tabelle
+    if ekg.hr:
+        df_hr = pd.DataFrame({
+            "Peak-Nr": list(range(1, len(ekg.hr)+1)),
             "Herzfrequenz (bpm)": ekg.hr
         })
-        avg_hr = sum(ekg.hr) / len(ekg.hr)
-        st.write(f"Durchschnittliche Herzfrequenz: **{round(avg_hr, 2)} bpm**")
-        st.dataframe(hr_df)
-    else:
-        st.warning("⚠️ Keine EKG-Daten vorhanden.")
+        avg = round(sum(ekg.hr)/len(ekg.hr), 2)
+        st.write(f"📊 Durchschnittliche HF: **{avg} bpm**")
+        st.dataframe(df_hr, use_container_width=True)
+
+
+    # Gleitender Durchschnitt (Fenstergröße 5)
+    window_size = st.slider("Fenstergröße für Gleitenden Durchschnitt", min_value=1, max_value=30, value=5, step=1)
+
+    if ekg.hr:
+        hr_array = np.array(ekg.hr)
+        smoothed_hr = np.convolve(hr_array, np.ones(window_size)/window_size, mode='valid')
+
+        fig_avg = go.Figure()
+        fig_avg.add_trace(go.Scatter(
+            y=smoothed_hr,
+            mode="lines+markers",
+            name="Geglättete HF"
+        ))
+        fig_avg.update_layout(
+            title="Geglättete Herzfrequenz über RR-Intervalle",
+            xaxis_title="RR-Intervall",
+            yaxis_title="Herzfrequenz (bpm)",
+            height=400
+        )
+        st.plotly_chart(fig_avg, use_container_width=True)
+
+
+
+
+
