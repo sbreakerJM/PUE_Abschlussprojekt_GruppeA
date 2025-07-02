@@ -1,18 +1,19 @@
-from tinydb import TinyDB, Query
 import os
+import shutil
+from tinydb import TinyDB, Query
 
 DB_PATH = "data/users_db.json"
+TEMPLATE_PATH = "data/users_db_template.json"
 
 def get_db():
-    # Stelle sicher, dass der Ordner existiert
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
-    # Wenn die Datei nicht existiert, lege sie mit leerem Inhalt an
+    # Falls DB noch nicht existiert → Vorlage kopieren
     if not os.path.exists(DB_PATH):
-        with open(DB_PATH, 'w') as f:
-            f.write('{}')
+        shutil.copyfile(TEMPLATE_PATH, DB_PATH)
 
     return TinyDB(DB_PATH)
+
 
 
 def create_user(username, password, role, fullname, person_dict):
