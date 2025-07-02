@@ -13,7 +13,6 @@ class Ekg_tests:
         self.peaks = []
         self.hr = []
 
-
     def load_signal(self):
         try:
             with open(self.result_link, "r") as file:
@@ -29,21 +28,19 @@ class Ekg_tests:
 
             if self.max_length is not None and len(data) > self.max_length:
                 data = data[:self.max_length]
-                print(f"⚠️ Signal gekürzt auf {self.max_length} Werte")
+                print(f"Signal gekürzt auf {self.max_length} Werte")
 
-            print(f"📦 {self.result_link}: {len(data)} Werte geladen")
+            print(f"{self.result_link}: {len(data)} Werte geladen")
             return data
 
         except Exception as e:
-            print(f"❌ Fehler beim Laden von {self.result_link}: {e}")
+            print(f"Fehler beim Laden von {self.result_link}: {e}")
             return []
 
 
     def find_peaks(self, threshold=360):
         from Src.find_peaks import find_peaks_custom
         self.peaks = find_peaks_custom(self.signal, threshold=threshold)
-
-
 
     def estimate_hr(self):
         hr = []
@@ -61,6 +58,31 @@ class Ekg_tests:
 
         self.hr = hr
         return self.hr
+    
+    def detect_anomalies(self, tachykard_limit=100, bradykard_limit=60):
+        """
+        Erkennt Herzfrequenz-Anomalien auf Basis der Peaks.
+        Gibt eine Liste mit gefundenen Anomalien zurück.
+        """
+        
+        if not self.peaks or len(self.peaks) < 2:
+            return []
+
+        rr_intervals = np.diff(self.peaks) / self.sampling_rate
+        hr_values = 60 / rr_intervals  # bpm
+
+        anomalies = []
+        for i, hr in enumerate(hr_values):
+            if hr > tachykard_limit:
+                anomalies.append((i, hr, "Tachykardie"))
+            elif hr < bradykard_limit:
+                anomalies.append((i, hr, "Bradykardie"))
+
+        rr_std = np.std(rr_intervals)
+        if rr_std > 0.15:
+            anomalies.append(("Global", None, f"Unregelmäßiger Rhythmus (RR-Std: {rr_std:.3f})"))
+
+        return anomalies
 
 
     def plot_time_series(self):
