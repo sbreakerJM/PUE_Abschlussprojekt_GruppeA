@@ -8,7 +8,7 @@ TEMPLATE_PATH = "data/users_db_template.json"
 def get_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
-    # Falls DB noch nicht existiert → Vorlage kopieren
+    # Falls DB noch nicht existiert Vorlage kopieren (nur für Streamlit Deployment)
     if not os.path.exists(DB_PATH):
         shutil.copyfile(TEMPLATE_PATH, DB_PATH)
 

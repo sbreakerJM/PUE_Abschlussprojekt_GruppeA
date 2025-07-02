@@ -4,6 +4,9 @@
 Diese Anwendung ermöglicht es, EKG-Daten hochzuladen, zu visualisieren und Herzfrequenz-Analysen durchzuführen. Sie bietet außerdem Benutzerverwaltung mit Login, Profilbearbeitung und Anomalieerkennung.
 
 ---
+Das Deployment via Streamlit funktioniert leider nicht zu 100%, da es Probleme mit der Datenbank gibt. Es wird empfohlen das Repo zu klonen und die `main.py` selbst auszuführen.
+
+---
 
 ## Voraussetzungen
 

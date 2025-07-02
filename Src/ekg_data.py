@@ -19,7 +19,7 @@ class Ekg_tests:
                 data = []
                 for line in file:
                     if line.strip():
-                        parts = line.strip().split()  # Trennung z. B. bei Tab
+                        parts = line.strip().split()  # Trennung 
                         try:
                             value = float(parts[0])    # Nur erste Spalte (Signalwert)
                             data.append(value)
